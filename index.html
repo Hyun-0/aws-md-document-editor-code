@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markdown Editor</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body { display: flex; flex-direction: row; margin: 0; font-family: Arial, sans-serif; height: 100vh; }
+        #fileList { width: 200px; background-color: #f4f4f4; overflow-y: auto; border-right: 1px solid #ccc; }
+        #fileList div { padding: 10px; cursor: pointer; border-bottom: 1px solid #ccc; }
+        #fileList div:hover { background-color: #ddd; }
+        #editor-container { flex: 1; display: flex; flex-direction: column; }
+        #fileName { text-align: center; font-size: 24px; margin: 10px 0; border: none; background: none; outline: none; width: 100%; }
+        #editor, #preview { flex: 1; padding: 20px; box-sizing: border-box; border: none; }
+        button { margin: 10px; padding: 10px 20px; background-color: #007bff; color: white; border: none; cursor: pointer; }
+        #controls { display: flex; justify-content: space-between; }
+    </style>
+</head>
+<body>
+    <div id="fileList"></div>
+    <div id="editor-container">
+        <input id="fileName" value="new_document.md" />
+        <button id="loginButton">로그인</button>
+        <div id="controls">
+            <button id="toggleMode">보기 모드로 전환</button>
+            <div>
+                <button id="saveBtn" style="display: none;">저장</button>
+                <button id="deleteBtn" style="display: none;">삭제</button>
+            </div>
+        </div>
+        <textarea id="editor" placeholder="여기에 Markdown을 입력하세요..."></textarea>
+        <div id="preview" style="display:none;"></div>
+    </div>
+
+    <script>
+        const editor = document.getElementById('editor');
+        const preview = document.getElementById('preview');
+        const toggleButton = document.getElementById('toggleMode');
+        const saveButton = document.getElementById('saveBtn');
+        const deleteButton = document.getElementById('deleteBtn');
+        const fileListContainer = document.getElementById('fileList');
+        const fileNameInput = document.getElementById('fileName');
+        const loginButton = document.getElementById('loginButton');
+
+        let isEditing = true;
+        let currentFileName = '';
+
+        // 파일 목록 불러오기 함수
+        async function loadFileList() {
+            const response = await fetch('save.php?action=list');
+            const files = await response.json();
+            fileListContainer.innerHTML = '';  // 기존 목록 초기화
+
+            // 파일 목록 추가
+            files.forEach(file => {
+                const fileItem = document.createElement('div');
+                
+                // 파일 이름 표시
+                const fileNameSpan = document.createElement('span');
+                fileNameSpan.textContent = file.name;
+                fileItem.appendChild(fileNameSpan);
+
+                // 소유자 표시
+                const ownerSpan = document.createElement('span');
+                ownerSpan.textContent = ` (${file.owner})`;
+                ownerSpan.style.color = 'gray';
+                ownerSpan.style.fontSize = '0.8em';
+                ownerSpan.style.marginLeft = '5px';
+                fileItem.appendChild(ownerSpan);
+
+                // 클릭 이벤트 추가
+                fileItem.onclick = () => loadFile(file.name);
+                fileListContainer.appendChild(fileItem);
+            });
+
+            // + 버튼 추가
+            const newFileButton = document.createElement('div');
+            newFileButton.textContent = '+';  // 버튼 텍스트
+            newFileButton.style.textAlign = 'center';
+            newFileButton.style.fontSize = '20px';
+            newFileButton.style.color = '#007bff';
+            newFileButton.style.cursor = 'pointer';
+            newFileButton.style.padding = '10px';
+            
+            // 버튼 클릭 시 새 문서 생성
+            newFileButton.onclick = () => {  
+                editor.value = '';  // 에디터 초기화  
+                fileNameInput.value = 'new_document.md';  // 기본 파일명 설정  
+                currentFileName = '';  // 현재 파일명 초기화  
+            
+                toggleModeToEdit();  // 보기 모드에서 수정 모드로 전환  
+                saveButton.style.display = 'inline-block';  // 저장 버튼 표시  
+                deleteButton.style.display = 'none';  // 삭제 버튼 숨김  
+            };
+
+            // + 버튼 아래에 파일 업로드 버튼 추가
+            const uploadButton = document.createElement('div');
+            uploadButton.textContent = '파일 업로드';
+            uploadButton.style.textAlign = 'center';
+            uploadButton.style.fontSize = '16px';
+            uploadButton.style.color = '#28a745';
+            uploadButton.style.cursor = 'pointer';
+            uploadButton.style.padding = '10px';
+
+            // 파일 입력 요소 숨기고 버튼 클릭 시 트리거
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.style.display = 'none';
+
+            uploadButton.onclick = () => fileInput.click();  // 버튼 클릭 시 파일 선택 창 열기
+
+            // 파일 선택 이벤트 처리
+            fileInput.onchange = async (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const formData = new FormData();
+                    formData.append('file', file);  // FormData 객체에 파일 추가
+
+                    try {
+                        const response = await fetch('save.php?action=upload', {
+                            method: 'POST',
+                            body: formData  // FormData 전송
+                        });
+
+                        const result = await response.json();
+                        if (result.success) {
+                            alert('파일이 성공적으로 업로드되었습니다.');
+                            loadFileList();  // 파일 목록 새로고침
+                        } else {
+                            alert(`업로드 실패: ${result.message}`);
+                        }
+                    } catch (error) {
+                        console.error('파일 업로드 오류:', error);
+                        alert('파일 업로드 중 오류가 발생했습니다.');
+                    }
+                }
+            };
+
+            fileListContainer.appendChild(newFileButton);  // 버튼을 파일 목록에 추가
+            fileListContainer.appendChild(uploadButton); // 파일 목록에 업로드 버튼 추가
+            fileListContainer.appendChild(fileInput);  // 파일 입력 요소 연결
+        }
+
+        // 수정 모드 강제 전환 함수
+        function toggleModeToEdit() {
+            if (!isEditing) {
+                toggleButton.click();  // 보기 모드라면 수정 모드로 전환
+            }
+        }
+
+
+        async function loadFile(fileName) {
+            const response = await fetch(`save.php?action=load&name=${encodeURIComponent(fileName)}`);
+            if (response.ok) {
+                const data = await response.json();
+                editor.value = data.content;  // 파일 내용 불러오기
+                fileNameInput.value = fileName;
+                currentFileName = fileName;
+        
+                // 로그인 상태 확인 후 삭제 버튼 표시
+                checkLogin(fileName, data.username);
+                if (!isEditing) toggleMode(); // 보기 모드에서 수정 모드로 전환
+            } else {
+                alert('파일을 불러오는 데 실패했습니다.');
+            }
+        }
+        
+        // 로그인 상태와 파일 소유자를 비교하여 버튼 표시 여부 결정
+        async function checkLogin(fileName, fileOwner) {
+            const response = await fetch('check_login.php');
+            const data = await response.json();
+            
+            if (data.loggedIn) {
+                loginButton.textContent = data.username;  // 로그인된 사용자명 표시
+
+                // 문서의 소유자와 로그인된 사용자가 일치하는 경우에만 저장/삭제 버튼 표시
+                if (data.username === fileOwner) {
+                    saveButton.style.display = 'inline-block';
+                    deleteButton.style.display = 'inline-block';
+                } else {
+                    saveButton.style.display = 'none';
+                    deleteButton.style.display = 'none';
+                }
+            } else {
+                loginButton.textContent = '로그인';
+                saveButton.style.display = 'none';  // 로그인되지 않으면 저장 버튼 숨기기
+                deleteButton.style.display = 'none';  // 로그인되지 않으면 삭제 버튼 숨기기
+            }
+        } 
+
+        // 파일 소유자 가져오기
+        async function getFileOwner(fileName) {
+            const response = await fetch(`save.php?action=load&name=${encodeURIComponent(fileName)}`);
+            const data = await response.json();
+            return data.username;
+        }
+
+        // 파일 삭제
+        deleteButton.addEventListener('click', async () => {
+            if (confirm('이 문서를 삭제하시겠습니까?')) {
+                const response = await fetch(`save.php?action=delete&name=${encodeURIComponent(currentFileName)}`);
+                const data = await response.json();
+                if (data.message) {
+                    alert(data.message);
+                    loadFileList(); // 파일 목록 새로 고침
+                } else {
+                    alert(data.error);
+                }
+            }
+        });
+
+        // 보기/수정 모드 전환
+        toggleButton.addEventListener('click', () => {
+            if (isEditing) {
+                preview.innerHTML = marked.parse(editor.value);
+                editor.style.display = 'none';
+                preview.style.display = 'block';
+                toggleButton.textContent = '수정 모드로 전환';
+            } else {
+                editor.style.display = 'block';
+                preview.style.display = 'none';
+                toggleButton.textContent = '보기 모드로 전환';
+            }
+            isEditing = !isEditing;
+        });
+
+        // 파일 저장
+        saveButton.addEventListener('click', async () => {
+            const content = editor.value;
+            const fileName = fileNameInput.value.trim();
+            const response = await fetch('save.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileName, content })
+            });
+
+            if (response.ok) {
+                alert('파일이 저장되었습니다.');
+                loadFileList(); // 파일 목록 새로고침
+            } else {
+                alert('저장에 실패했습니다.');
+            }
+        });
+
+        // Check if user is logged in
+        fetch('check_login.php')
+            .then(response => response.json())
+            .then(data => {
+                if (data.loggedIn) {
+                    loginButton.textContent = data.username;  // Display the username
+                } else {
+                    loginButton.textContent = '로그인';
+                }
+            });
+
+        // 로그아웃 버튼 클릭 시
+        loginButton.addEventListener('click', () => {
+            if (loginButton.textContent === '로그인') {
+                window.location.href = 'login.html'; // 로그인되지 않으면 로그인 페이지로 리디렉션
+            } else {
+                // 로그아웃 확인
+                const logoutConfirmed = confirm('로그아웃 하시겠습니까?');
+                if (logoutConfirmed) {
+                    // 로그아웃 요청
+                    fetch('logout.php')
+                        .then(() => {
+                            loginButton.textContent = '로그인';  // 버튼 텍스트 변경
+                            alert('로그아웃 되었습니다.');
+                            window.location.href = 'login.html';  // 로그아웃 후 로그인 페이지로 리디렉션
+                        })
+                        .catch(error => {
+                            console.error('로그아웃 중 오류 발생:', error);
+                            alert('로그아웃에 실패했습니다.');
+                        });
+                }
+            }
+        });
+
+        // 페이지 로드 시 파일 목록 불러오기
+        window.onload = async () => {
+            // 로그인 상태 확인
+            const response = await fetch('check_login.php');
+            const data = await response.json();
+            
+            if (!data.loggedIn) {
+                window.location.href = 'login.html';  // 로그인되지 않으면 로그인 페이지로 리디렉션
+                return;
+            }
+        
+            // 로그인 상태라면 파일 목록을 로드
+            loadFileList();
+        };
+    </script>
+</body>
+</html>
+
